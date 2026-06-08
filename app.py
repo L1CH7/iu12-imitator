@@ -34,8 +34,8 @@ N = st.session_state.sl_N
 # Ввод параметра b
 st.sidebar.write(r"Параметр дискретизации ($b$):")
 c1, c2 = st.sidebar.columns([3, 2])
-c1.slider("sl_b", 0.001, 0.2, step=0.001, key="sl_b", on_change=sync_val, args=("sl_b", "bx_b"), label_visibility="collapsed")
-c2.number_input("bx_b", 0.001, 0.2, step=0.001, format="%.3f", key="bx_b", on_change=sync_val, args=("bx_b", "sl_b"), label_visibility="collapsed")
+c1.slider("sl_b", 0.0001, 1.0, step=0.0001, key="sl_b", on_change=sync_val, args=("sl_b", "bx_b"), label_visibility="collapsed")
+c2.number_input("bx_b", 0.0001, 1.0, step=0.0001, format="%.3f", key="bx_b", on_change=sync_val, args=("bx_b", "sl_b"), label_visibility="collapsed")
 b = st.session_state.sl_b
 
 # Ввод параметра omega_c
