@@ -1,135 +1,113 @@
+import matplotlib.pyplot as plt
+import numpy as np
 import streamlit as st
-import plotly.graph_objects as ui_plot
-from signal_math import generate_signal_and_acf
-from config import VARIANT_CONFIGS, DEFAULT_PARAMS, calculate_delta_tau
 
-# Установка конфигурации страницы с широким макетом
-st.set_page_config(page_title="Имитация сигналов", layout="wide")
+# Настройка страницы для использования всей ширины
+st.set_page_config(layout="wide", page_title="Имитатор дискретных сигналов")
 
-# Стили для минимизации отступов
-st.markdown("""
-    <style>
-        .block-container {
-            padding-top: 0.5rem;
-            padding-bottom: 0.5rem;
-            padding-left: 1.5rem;
-            padding-right: 1.5rem;
-        }
-    </style>
-""", unsafe_allow_html=True)
+st.title("Имитация дискретных детерминированных сигналов")
 
-# --- БОКОВАЯ ПАНЕЛЬ С НАСТРОЙКАМИ (УПРАВЛЕНИЕ) ---
-st.sidebar.title("📊 Имитация сигналов")
+# 1. СИНХРОНИЗАЦИЯ ПАРАМЕТРОВ (Инициализация без конфликтов в Session State)
+if 'sl_N' not in st.session_state:
+    st.session_state.update(
+        sl_N=64, bx_N=64,
+        sl_b=0.010, bx_b=0.010,
+        sl_om=6.28, bx_om=6.28
+    )
 
-# Карточка "Дано" (исходные параметры)
-st.sidebar.markdown(f"""
-<div style="border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; background-color: #f8fafc; margin-bottom: 10px;">
-    <span style="color: #475569; font-size: 0.85em; font-weight: 600; display: block; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 6px;">Исходные параметры (Дано по ТЗ):</span>
-    <span style="color: #64748b; font-size: 0.8em; display: block;">• N = {DEFAULT_PARAMS["N"]}</span>
-    <span style="color: #64748b; font-size: 0.8em; display: block;">• ω<sub>c</sub> = 2π ≈ 6.28</span>
-    <span style="color: #64748b; font-size: 0.8em; display: block;">• b = {DEFAULT_PARAMS["b"]}</span>
-    <span style="color: #64748b; font-size: 0.8em; display: block;">• σ<sup>2</sup> = {DEFAULT_PARAMS["sigma2"]}</span>
-</div>
-""", unsafe_allow_html=True)
+st.sidebar.header("Параметры имитации")
+variant = st.sidebar.radio("Математическая модель процесса:", ["Вариант 1 (Белый шум)", "Вариант 2 (Экспоненциальная ФСП)"])
+v = 1 if "Вариант 1" in variant else 2
 
-st.sidebar.header("Параметры")
+st.sidebar.markdown("---")
 
-# Вариант сигнала через радиокнопки
-variant = st.sidebar.radio(
-    "Вариант сигнала:", 
-    (1, 2), 
-    format_func=lambda x: "Вариант 1 (Белый шум)" if x == 1 else "Вариант 2 (Экспоненциальная ФСП)"
-)
+def sync_val(key_from, key_to): 
+    st.session_state[key_to] = st.session_state[key_from]
 
-# Получаем конфигурацию для выбранного варианта из единого файла config.py
-cfg = VARIANT_CONFIGS[variant]
+# Ввод параметра N
+st.sidebar.write(r"Число отсчетов ($N$):")
+c1, c2 = st.sidebar.columns([3, 2])
+c1.slider("sl_N", 4, 512, step=2, key="sl_N", on_change=sync_val, args=("sl_N", "bx_N"), label_visibility="collapsed")
+c2.number_input("bx_N", 4, 512, step=2, key="bx_N", on_change=sync_val, args=("bx_N", "sl_N"), label_visibility="collapsed")
+N = st.session_state.sl_N
 
-N = st.sidebar.slider(
-    "Число отсчетов сигнала (N):", 
-    min_value=cfg["N_min"], 
-    max_value=cfg["N_max"], 
-    value=cfg["N_default"], 
-    step=2,
-    key=f"N_slider_{variant}"
-)
+# Ввод параметра b
+st.sidebar.write(r"Параметр дискретизации ($b$):")
+c1, c2 = st.sidebar.columns([3, 2])
+c1.slider("sl_b", 0.001, 0.2, step=0.001, key="sl_b", on_change=sync_val, args=("sl_b", "bx_b"), label_visibility="collapsed")
+c2.number_input("bx_b", 0.001, 0.2, step=0.001, format="%.3f", key="bx_b", on_change=sync_val, args=("bx_b", "sl_b"), label_visibility="collapsed")
+b = st.session_state.sl_b
 
-omega_c = st.sidebar.slider(
-    "Частота среза (omega_c):", 
-    min_value=cfg["omega_c_min"], 
-    max_value=cfg["omega_c_max"], 
-    value=cfg["omega_c_default"], 
-    step=0.1,
-    key=f"omega_c_slider_{variant}"
-)
+# Ввод параметра omega_c
+st.sidebar.write(r"Частота среза ($\omega_c$):")
+c1, c2 = st.sidebar.columns([3, 2])
+c1.slider("sl_om", 0.5, 15.0, step=0.01, key="sl_om", on_change=sync_val, args=("sl_om", "bx_om"), label_visibility="collapsed")
+c2.number_input("bx_om", 0.5, 15.0, step=0.01, format="%.2f", key="bx_om", on_change=sync_val, args=("bx_om", "sl_om"), label_visibility="collapsed")
+omega_c = st.session_state.sl_om
 
-b = st.sidebar.slider(
-    "Параметр дискретизации (b):", 
-    min_value=cfg["b_min"], 
-    max_value=cfg["b_max"], 
-    value=cfg["b_default"], 
-    step=0.0001, 
-    format="%.4f", 
-    key=f"b_slider_{variant}"
-)
 
-sigma2 = st.sidebar.slider(
-    "Дисперсия (sigma^2):", 
-    min_value=cfg["sigma2_min"], 
-    max_value=cfg["sigma2_max"], 
-    value=cfg["sigma2_default"], 
-    step=0.1,
-    key=f"sigma2_slider_{variant}"
-)
+# 2. МАТЕМАТИЧЕСКИЙ РАСЧЕТ
+i_vec = np.arange(N)
+k_vec = np.arange(1, N // 2)
+X_fch = np.zeros(N // 2 + 1)
+sigma2 = 1.0
 
-# --- ВЫЧИСЛЕНИЯ ---
-i_vec, x_signal, m_vec, R_theor, R_exp, abs_error, mean_error = generate_signal_and_acf(
-    variant, N, omega_c, b, sigma2
-)
+if v == 1:
+    X_fch[0] = X_fch[-1] = np.sqrt(sigma2 / N)
+    X_fch[1:-1] = np.sqrt(sigma2 / (2 * N))
+else:
+    b_safe = max(b, 1e-10)
+    x_c = 2 * np.sqrt(2.3 * np.log10(1 / b_safe))
+    X_fch[0] = np.sqrt((sigma2 * x_c) / (np.sqrt(np.pi) * N))
+    X_fch[-1] = np.sqrt((sigma2 * x_c / (np.sqrt(np.pi) * N)) * np.exp(-(x_c**2) / 4))
+    X_fch[1:-1] = np.sqrt((sigma2 * x_c / (2 * np.sqrt(np.pi) * N)) * np.exp(-(x_c**2 * k_vec**2) / N**2))
 
-# --- ВЫХОДНОЙ ПАРАМЕТР В РАМОЧКЕ В SIDEBAR ---
-delta_tau = calculate_delta_tau(b, omega_c)
+phase = (2 * np.pi / N) * np.outer(i_vec, k_vec)
+x = X_fch[0] + 2 * (np.dot(np.cos(phase), X_fch[1:-1]) + np.dot(np.sin(phase), X_fch[1:-1])) + X_fch[-1] * np.cos(np.pi * i_vec)
 
-st.sidebar.markdown(f"""
-<div style="border: 1px solid #cbd5e1; padding: 10px; border-radius: 6px; background-color: #f8fafc; text-align: center; margin-top: 15px;">
-    <span style="color: #334155; font-size: 0.9em; font-weight: 500; display: block;">Шаг дискретизации (delta_tau):</span>
-    <span style="color: #0f172a; font-size: 1.1em; font-weight: 600; display: block; margin-top: 2px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; margin-bottom: 6px;">{delta_tau:.6f}</span>
-    <span style="color: #334155; font-size: 0.9em; font-weight: 500; display: block;">Средняя абсолютная погрешность АКФ:</span>
-    <span style="color: #dc2626; font-size: 1.15em; font-weight: 700; display: block; margin-top: 4px;">{mean_error:.6f}</span>
-</div>
-""", unsafe_allow_html=True)
+R_exp = np.array([np.sum(x[: N - m] * x[m:]) / (N - m) for m in range(N)])
 
-# --- ПОСТРОЕНИЕ ИНТЕРАКТИВНЫХ ГРАФИКОВ (PLOTLY WHITE) ---
-# 1. График сигнала (высота 290)
-fig_sig = ui_plot.Figure()
-fig_sig.add_trace(ui_plot.Scatter(x=i_vec, y=x_signal, mode='markers+lines', 
-                                 marker=dict(size=5, color='#0066cc'), name='x(i)'))
-fig_sig.update_layout(
-    title=dict(text="Дискретный сигнал x(i)", font=dict(size=14)),
-    xaxis_title="Индекс (i)", yaxis_title="x(i)",
-    margin=dict(l=10, r=10, t=30, b=10), height=290, template="plotly_white"
-)
-st.plotly_chart(fig_sig, width='stretch')
+if v == 1:
+    R_th = np.ones(N) * sigma2
+    arg = (np.pi * b) * i_vec[1:]
+    R_th[1:] = (sigma2 * np.sin(arg)) / arg
+else:
+    R_th = sigma2 * np.exp(-(np.pi**2 * i_vec**2) / x_c**2)
 
-# 2. График сравнения АКФ (высота 290)
-fig_acf = ui_plot.Figure()
-fig_acf.add_trace(ui_plot.Scatter(x=m_vec, y=R_theor, mode='lines+markers', name='Теор. R_т(m)', 
-                                 line=dict(color='#0066cc', width=1.5), marker=dict(size=3)))
-fig_acf.add_trace(ui_plot.Scatter(x=m_vec, y=R_exp, mode='markers', name='Эксп. R_э(m)', 
-                                 marker=dict(symbol='x', size=6, color='#dc2626')))
-fig_acf.update_layout(
-    title=dict(text="Сравнение АКФ", font=dict(size=14)),
-    xaxis_title="Сдвиг (m)", yaxis_title="R(m)",
-    margin=dict(l=10, r=10, t=30, b=10), height=290, template="plotly_white",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-)
-st.plotly_chart(fig_acf, width='stretch')
+err = np.abs(R_exp - R_th)
 
-# 3. График погрешности (высота 220)
-fig_err = ui_plot.Figure()
-fig_err.add_trace(ui_plot.Bar(x=m_vec, y=abs_error, marker_color='#475569', name='Погрешность'))
-fig_err.update_layout(
-    title=dict(text="Абсолютная ошибка АКФ", font=dict(size=14)),
-    xaxis_title="Сдвиг (m)", yaxis_title="Ошибка",
-    margin=dict(l=10, r=10, t=30, b=10), height=220, template="plotly_white"
-)
-st.plotly_chart(fig_err, width='stretch')
+
+# 3. ВИЗУАЛИЗАЦИЯ С УЧЕТОМ ОБНОВЛЕНИЙ API ТЕКУЩЕГО ГОДА
+plt.rcParams.update({'font.size': 10, 'axes.edgecolor': '#cccccc', 'grid.color': '#eeeeee'})
+fig, axes = plt.subplots(3, 1, figsize=(12, 10))
+plt.subplots_adjust(hspace=0.5)
+
+# График 1: Сигнал
+axes[0].plot(i_vec, x, color='#1f77b4', marker='o', markersize=3, linewidth=1, label=r'$x(i)$')
+axes[0].set_title("Дискретные отсчеты синтезированного сигнала", loc='left', fontweight='bold')
+axes[0].set_ylabel("Амплитуда")
+axes[0].legend(loc='lower left', fontsize=8)
+
+# График 2: АКФ
+axes[1].plot(i_vec, R_th, color='#2ca02c', linewidth=2, label=r'Теоретическая АКФ $R_T(m)$')
+axes[1].plot(i_vec, R_exp, color='#ff7f0e', linestyle='--', marker='x', markersize=4, label=r'Экспериментальная АКФ $R_э(m)$')
+axes[1].set_title("Автокорреляционная функция детерминированного процесса", loc='left', fontweight='bold')
+axes[1].set_ylabel("$R(m)$")
+axes[1].legend(loc='lower left', fontsize=8)
+
+# График 3: Погрешность
+axes[2].bar(i_vec, err, color='#d62728', alpha=0.6, label=r'$\Delta R(m) = |R_T(m) - R_э(m)|$')
+axes[2].set_title(f"Абсолютная погрешность имитации (Среднее значение: {np.mean(err):.6f})", loc='left', fontweight='bold')
+axes[2].set_xlabel(r"Номер отсчета ($i, m$)")
+axes[2].set_ylabel("Ошибка")
+axes[2].legend(loc='lower left', fontsize=8)
+
+# Настройка осей и удаления рамок
+for ax in axes:
+    ax.grid(True, which='both', linestyle=':', alpha=0.5)
+    ax.set_xlim(-N * 0.02, N * 1.02)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+# Корректное отображение по ширине страницы без Deprecation Warnings
+st.pyplot(fig, width='stretch')
